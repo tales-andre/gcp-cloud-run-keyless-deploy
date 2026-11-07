@@ -1,0 +1,19 @@
+# Terraform working files and state (state never belongs in git)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.plan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+terraform.tfvars
+
+# The app is checked out here by scripts/fetch-app.sh
+app-src/
+
+# Local secrets
+.env
+*.json.key
