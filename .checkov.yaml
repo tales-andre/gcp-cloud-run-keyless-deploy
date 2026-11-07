@@ -1,0 +1,8 @@
+# Checkov settings for infra/. Skips are listed with the reason, so a
+# reviewer can disagree with each one.
+compact: true
+quiet: true
+framework:
+  - terraform
+skip-path:
+  - infra/tests
