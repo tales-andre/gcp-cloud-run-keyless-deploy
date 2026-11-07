@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600" role="img" aria-labelledby="title desc" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="title">Keyless deploy from GitHub Actions to Cloud Run</title>
+  <desc id="desc">GitHub Actions gets a short-lived OIDC token, Google Workload Identity Federation checks repository, branch and environment, and the deployer service account copies the tested image into Artifact Registry and rolls it out to Cloud Run in staging, then in production after approval. No service account key exists.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="600" fill="#ffffff"/>
+
+  <!-- GitHub -->
+  <rect x="20" y="20" width="290" height="500" rx="10" fill="#f6f8fa" stroke="#94a3b8"/>
+  <text x="40" y="50" font-size="18" font-weight="700" fill="#0f172a">GitHub</text>
+
+  <rect x="40" y="70" width="250" height="110" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="55" y="95" font-size="14" font-weight="700" fill="#0f172a">ci.yml, every push and PR</text>
+  <text x="55" y="117" font-size="12.5" fill="#334155">terraform fmt, validate, test</text>
+  <text x="55" y="135" font-size="12.5" fill="#334155">(mock Google provider)</text>
+  <text x="55" y="153" font-size="12.5" fill="#334155">tflint, Checkov, conftest</text>
+  <text x="55" y="171" font-size="12.5" fill="#334155">image build + smoke test</text>
+
+  <rect x="40" y="195" width="250" height="70" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="55" y="220" font-size="14" font-weight="700" fill="#0f172a">deploy.yml, manual, main only</text>
+  <text x="55" y="242" font-size="12.5" fill="#334155">build once, Trivy scan,</text>
+  <text x="55" y="258" font-size="12.5" fill="#334155">push to GHCR: one digest</text>
+
+  <rect x="40" y="280" width="250" height="70" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="55" y="305" font-size="14" font-weight="700" fill="#0f172a">job in environment "staging"</text>
+  <text x="55" y="327" font-size="12.5" fill="#334155">OIDC token signed by GitHub,</text>
+  <text x="55" y="343" font-size="12.5" fill="#334155">valid for minutes</text>
+
+  <rect x="40" y="365" width="250" height="70" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="55" y="390" font-size="14" font-weight="700" fill="#0f172a">job in environment "production"</text>
+  <text x="55" y="412" font-size="12.5" fill="#334155">starts only after a person</text>
+  <text x="55" y="428" font-size="12.5" fill="#334155">approves it</text>
+
+  <text x="40" y="465" font-size="12.5" fill="#334155">No cloud key in GitHub secrets.</text>
+  <text x="40" y="483" font-size="12.5" fill="#334155">ci.yml needs no cloud account.</text>
+
+  <!-- Workload Identity Federation -->
+  <rect x="345" y="20" width="270" height="500" rx="10" fill="#eef4ff" stroke="#94a3b8"/>
+  <text x="365" y="50" font-size="18" font-weight="700" fill="#0f172a">Google Cloud login</text>
+
+  <rect x="365" y="70" width="230" height="170" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="380" y="95" font-size="14" font-weight="700" fill="#0f172a">Workload Identity pool</text>
+  <text x="380" y="117" font-size="12.5" fill="#334155">accepts a token only if</text>
+  <text x="380" y="137" font-size="12.5" fill="#334155">• repository is</text>
+  <text x="392" y="153" font-size="12" fill="#334155" font-family="Consolas, Menlo, monospace">tales-andre/gcp-cloud-</text>
+  <text x="392" y="168" font-size="12" fill="#334155" font-family="Consolas, Menlo, monospace">run-keyless-deploy</text>
+  <text x="380" y="188" font-size="12.5" fill="#334155">• branch is main</text>
+  <text x="380" y="208" font-size="12.5" fill="#334155">• environment matches</text>
+  <text x="380" y="228" font-size="12.5" fill="#334155">  this project's environment</text>
+
+  <rect x="365" y="270" width="230" height="165" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="380" y="295" font-size="14" font-weight="700" fill="#0f172a">deployer service account</text>
+  <text x="380" y="317" font-size="12.5" fill="#334155">short-lived credentials only</text>
+  <text x="380" y="339" font-size="12.5" fill="#334155">• push to one image repository</text>
+  <text x="380" y="359" font-size="12.5" fill="#334155">• roll out one Cloud Run service</text>
+  <text x="380" y="379" font-size="12.5" fill="#334155">• start it as the runtime account</text>
+  <text x="380" y="399" font-size="12.5" fill="#334155">• no project-wide role</text>
+  <text x="380" y="419" font-size="12.5" fill="#334155">• no key, ever</text>
+
+  <text x="365" y="465" font-size="12.5" fill="#334155">One pool and one deployer per</text>
+  <text x="365" y="483" font-size="12.5" fill="#334155">environment project.</text>
+
+  <!-- Projects -->
+  <rect x="650" y="20" width="330" height="240" rx="10" fill="#f0fdf4" stroke="#94a3b8"/>
+  <text x="670" y="50" font-size="18" font-weight="700" fill="#0f172a">Staging project</text>
+  <rect x="670" y="65" width="290" height="40" rx="6" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="685" y="90" font-size="13" fill="#0f172a">Artifact Registry: same digest, copied</text>
+  <rect x="670" y="115" width="290" height="70" rx="6" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="685" y="138" font-size="13" font-weight="700" fill="#0f172a">Cloud Run: private, at most 2</text>
+  <text x="685" y="158" font-size="12.5" fill="#334155">callers: tester group, and the</text>
+  <text x="685" y="175" font-size="12.5" fill="#334155">deployer for the smoke test</text>
+  <rect x="670" y="195" width="290" height="50" rx="6" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="685" y="217" font-size="12.5" fill="#334155">Secret Manager (only with an AI</text>
+  <text x="685" y="235" font-size="12.5" fill="#334155">provider): read by runtime account only</text>
+
+  <rect x="650" y="280" width="330" height="240" rx="10" fill="#fff7ed" stroke="#94a3b8"/>
+  <text x="670" y="310" font-size="18" font-weight="700" fill="#0f172a">Production project</text>
+  <rect x="670" y="325" width="290" height="40" rx="6" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="685" y="350" font-size="13" fill="#0f172a">Artifact Registry: same digest, copied</text>
+  <rect x="670" y="375" width="290" height="70" rx="6" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="685" y="398" font-size="13" font-weight="700" fill="#0f172a">Cloud Run: public, at most 5</text>
+  <text x="685" y="418" font-size="12.5" fill="#334155">deletion protection on;</text>
+  <text x="685" y="435" font-size="12.5" fill="#334155">scales to zero when idle</text>
+  <rect x="670" y="455" width="290" height="50" rx="6" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="685" y="477" font-size="12.5" fill="#334155">Secret Manager (only with an AI</text>
+  <text x="685" y="495" font-size="12.5" fill="#334155">provider): read by runtime account only</text>
+
+  <!-- Arrows -->
+  <line x1="290" y1="315" x2="362" y2="160" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="290" y1="400" x2="362" y2="200" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="480" y1="240" x2="480" y2="267" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="595" y1="320" x2="667" y2="90" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="595" y1="360" x2="667" y2="350" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="815" y1="105" x2="815" y2="113" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="815" y1="365" x2="815" y2="373" stroke="#334155" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <!-- Footer -->
+  <rect x="20" y="540" width="960" height="44" rx="8" fill="#f8fafc" stroke="#cbd5e1"/>
+  <text x="40" y="567" font-size="13" fill="#0f172a">Terraform in infra/ is applied by a person after reading the plan; the workflow only ships images. Nothing here has run in a live project.</text>
+</svg>
