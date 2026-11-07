@@ -1,0 +1,89 @@
+name: ci
+
+# Every check runs on GitHub's runners with no cloud account and no
+# credentials: Terraform is tested against a mocked Google provider, the
+# code is read by linters and policies, and the chatbot image is built and
+# asked two questions in Docker. The same scripts run on a laptop.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: 1.11.3
+
+jobs:
+  terraform:
+    name: terraform fmt, validate and test (mock provider)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: fmt, validate, terraform test
+        run: scripts/test-infra.sh
+
+  static:
+    name: tflint, Checkov and conftest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: tflint, Checkov, conftest (the unsafe examples must fail)
+        env:
+          # tflint downloads the Google ruleset from GitHub releases.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/lint.sh tflint checkov conftest
+
+  workflows:
+    name: actionlint, zizmor and shellcheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: lint the workflows and scripts
+        run: scripts/lint.sh actionlint zizmor shellcheck
+
+  smoke:
+    name: build the chatbot image and smoke test it
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: check out the PDF chatbot at the commit pinned in app.env
+        run: scripts/fetch-app.sh
+
+      - name: build with its own Dockerfile, run offline, ask two questions
+        run: scripts/smoke.sh

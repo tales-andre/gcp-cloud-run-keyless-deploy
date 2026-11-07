@@ -1,0 +1,244 @@
+name: deploy
+
+# Ships the PDF chatbot to Cloud Run: build the image once and scan it, deploy
+# that exact digest to staging, smoke test it, wait for a person to approve,
+# then deploy the same digest to production. GitHub logs in to Google Cloud with Workload
+# Identity Federation; there is no service account key anywhere.
+#
+# This workflow has never run. It needs the repository variables printed by
+# `terraform output github_variables` for each environment, and GitHub
+# environments named staging and production (production with a required
+# reviewer). Without the variables every job after the first is skipped.
+#
+# Terraform is not run here: you apply infra/ yourself after reading the plan.
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "Redeploy an image this workflow built before (sha256:...), for example to roll back. Leave empty to build a new one."
+        required: false
+        default: ""
+
+permissions: {}
+
+# One deploy at a time; a second run waits instead of overlapping.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  CRANE_VERSION: v0.22.1
+  CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+
+jobs:
+  configured:
+    name: check the Google Cloud variables
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+      app_context: ${{ steps.app.outputs.context }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: check
+        env:
+          STAGING_PROVIDER: ${{ vars.GCP_STG_WIF_PROVIDER }}
+          PRODUCTION_PROVIDER: ${{ vars.GCP_PRD_WIF_PROVIDER }}
+          REF: ${{ github.ref }}
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          ready=true
+          if [ -z "$STAGING_PROVIDER" ] || [ -z "$PRODUCTION_PROVIDER" ]; then
+            echo "::notice::The GCP_* repository variables are not set, so there is nothing to deploy to."
+            ready=false
+          fi
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::notice::Deploys run from main only (Google Cloud would refuse the login from $REF anyway)."
+            ready=false
+          fi
+          if [ -n "$DIGEST" ] && ! [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::digest must look like sha256:<64 hex characters>"
+            exit 1
+          fi
+          echo "ready=$ready" >>"$GITHUB_OUTPUT"
+
+      - id: app
+        name: the chatbot source pinned in app.env, as a Docker build context
+        run: |
+          source app.env
+          [[ "$APP_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::APP_COMMIT must be a full commit SHA"; exit 1; }
+          echo "context=https://github.com/${APP_REPOSITORY}.git#${APP_COMMIT}" >>"$GITHUB_OUTPUT"
+
+  # Shared with the other demos: build the image once, block it if Trivy finds
+  # a fixable CRITICAL or HIGH vulnerability, push it to GHCR and return its
+  # digest. Docker builds straight from the chatbot repository at the pinned
+  # commit, with that repository's own Dockerfile.
+  build:
+    name: build once, scan, push
+    needs: configured
+    if: needs.configured.outputs.ready == 'true' && inputs.digest == ''
+    permissions:
+      contents: read
+      packages: write # push the scanned image to this repository's GHCR package
+    uses: tales-andre/github-actions-safe-deploys/.github/workflows/build.yml@6069b74c192e8f2236e9ecdc8c0cc15569f58c30 # main, 2026-11-07
+    with:
+      context: ${{ needs.configured.outputs.app_context }}
+      dockerfile: Dockerfile
+      image: ghcr.io/${{ github.repository }}/pdf-chatbot
+      push: true
+
+  staging:
+    name: deploy to staging
+    needs: [configured, build]
+    if: >-
+      always() && needs.configured.outputs.ready == 'true' &&
+      (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.digest != ''))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: staging
+    permissions:
+      contents: read
+      packages: read # pull the tested image from GHCR to copy it
+      id-token: write # GitHub OIDC token for the Workload Identity Federation login
+    env:
+      DIGEST: ${{ needs.build.outputs.digest || inputs.digest }}
+      BUILT_IMAGE: ${{ needs.build.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: install crane (checksum verified)
+        run: |
+          curl -fsSL -o crane.tar.gz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum -c -
+          tar -xzf crane.tar.gz crane
+          sudo install crane /usr/local/bin/crane
+
+      - id: login
+        name: log in to Google Cloud (Workload Identity Federation, no key)
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_STG_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_STG_DEPLOYER }}
+          token_format: access_token
+
+      - id: promote
+        name: copy the tested image into Artifact Registry, same digest
+        env:
+          TARGET_REPOSITORY: ${{ vars.GCP_STG_REGISTRY }}
+          TARGET_TOKEN: ${{ steps.login.outputs.access_token }}
+          SOURCE_USER: ${{ github.actor }}
+          SOURCE_TOKEN: ${{ github.token }}
+        run: |
+          # A redeploy by digest skips the build, so fall back to the usual name.
+          export SOURCE_IMAGE="${BUILT_IMAGE:-ghcr.io/${GITHUB_REPOSITORY,,}/pdf-chatbot}"
+          scripts/promote-image.sh
+
+      - id: deploy
+        name: roll out the new revision
+        uses: google-github-actions/deploy-cloudrun@2028e2d7d30a78c6910e0632e48dd561b064884d # v3.0.1
+        with:
+          project_id: ${{ vars.GCP_STG_PROJECT }}
+          region: ${{ vars.GCP_STG_REGION }}
+          service: ${{ vars.GCP_STG_SERVICE }}
+          image: ${{ steps.promote.outputs.image }}
+          # Labels belong to Terraform; do not add the action's own.
+          skip_default_labels: true
+
+      - id: token
+        name: identity token for the private staging service
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_STG_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_STG_DEPLOYER }}
+          token_format: id_token
+          id_token_audience: ${{ steps.deploy.outputs.url }}
+          id_token_include_email: true
+
+      - name: smoke test the deployed revision
+        env:
+          SMOKE_URL: ${{ steps.deploy.outputs.url }}
+          ID_TOKEN: ${{ steps.token.outputs.id_token }}
+        run: scripts/smoke.sh
+
+  production:
+    name: deploy to production (after approval)
+    needs: [configured, build, staging]
+    if: always() && needs.staging.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # The production environment requires a reviewer, and the Google Cloud
+    # login condition only accepts tokens from jobs in this environment.
+    environment: production
+    permissions:
+      contents: read
+      packages: read # pull the tested image from GHCR to copy it
+      id-token: write # GitHub OIDC token for the Workload Identity Federation login
+    env:
+      DIGEST: ${{ needs.build.outputs.digest || inputs.digest }}
+      BUILT_IMAGE: ${{ needs.build.outputs.image }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: install crane (checksum verified)
+        run: |
+          curl -fsSL -o crane.tar.gz "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum -c -
+          tar -xzf crane.tar.gz crane
+          sudo install crane /usr/local/bin/crane
+
+      - id: login
+        name: log in to Google Cloud (Workload Identity Federation, no key)
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GCP_PRD_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_PRD_DEPLOYER }}
+          token_format: access_token
+
+      - id: promote
+        name: copy the same image into Artifact Registry, same digest
+        env:
+          TARGET_REPOSITORY: ${{ vars.GCP_PRD_REGISTRY }}
+          TARGET_TOKEN: ${{ steps.login.outputs.access_token }}
+          SOURCE_USER: ${{ github.actor }}
+          SOURCE_TOKEN: ${{ github.token }}
+        run: |
+          # A redeploy by digest skips the build, so fall back to the usual name.
+          export SOURCE_IMAGE="${BUILT_IMAGE:-ghcr.io/${GITHUB_REPOSITORY,,}/pdf-chatbot}"
+          scripts/promote-image.sh
+
+      - id: deploy
+        name: roll out the new revision
+        uses: google-github-actions/deploy-cloudrun@2028e2d7d30a78c6910e0632e48dd561b064884d # v3.0.1
+        with:
+          project_id: ${{ vars.GCP_PRD_PROJECT }}
+          region: ${{ vars.GCP_PRD_REGION }}
+          service: ${{ vars.GCP_PRD_SERVICE }}
+          image: ${{ steps.promote.outputs.image }}
+          skip_default_labels: true
+
+      - name: smoke test the deployed revision (public service only)
+        if: vars.GCP_PRD_PUBLIC == 'true'
+        env:
+          SMOKE_URL: ${{ steps.deploy.outputs.url }}
+        run: scripts/smoke.sh
+
+      - name: record what was deployed
+        env:
+          IMAGE: ${{ steps.promote.outputs.image }}
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          {
+            echo "production now runs $IMAGE"
+            echo "service: $URL"
+            echo "to roll back, run this workflow again with the previous digest"
+          } >>"$GITHUB_STEP_SUMMARY"
