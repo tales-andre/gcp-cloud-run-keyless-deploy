@@ -81,6 +81,11 @@ run "without_an_environment_the_subject_pins_the_branch" {
     condition     = google_iam_workload_identity_pool_provider.github.attribute_condition == "assertion.sub == 'repo:tales-andre/gcp-cloud-run-keyless-deploy:ref:refs/heads/main' && assertion.repository == 'tales-andre/gcp-cloud-run-keyless-deploy' && assertion.ref == 'refs/heads/main'"
     error_message = "Without an environment the subject claim must still pin the repository and the branch."
   }
+
+  assert {
+    condition     = !contains(keys(google_iam_workload_identity_pool_provider.github.attribute_mapping), "attribute.environment")
+    error_message = "The environment claim is only mapped when a job must run in an environment."
+  }
 }
 
 run "a_repository_name_cannot_inject_into_the_condition" {

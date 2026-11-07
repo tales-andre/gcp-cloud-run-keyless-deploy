@@ -27,15 +27,19 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   workload_identity_pool_provider_id = "github"
   display_name                       = "GitHub OIDC"
 
-  attribute_mapping = {
-    "google.subject"             = "assertion.sub"
-    "attribute.repository"       = "assertion.repository"
-    "attribute.repository_id"    = "assertion.repository_id"
-    "attribute.ref"              = "assertion.ref"
-    "attribute.environment"      = "assertion.environment"
-    "attribute.workflow_ref"     = "assertion.job_workflow_ref"
-    "attribute.repository_owner" = "assertion.repository_owner"
-  }
+  # The environment claim only exists for jobs that run in an environment, so
+  # it is mapped only when the condition requires one.
+  attribute_mapping = merge(
+    {
+      "google.subject"             = "assertion.sub"
+      "attribute.repository"       = "assertion.repository"
+      "attribute.repository_id"    = "assertion.repository_id"
+      "attribute.repository_owner" = "assertion.repository_owner"
+      "attribute.ref"              = "assertion.ref"
+      "attribute.workflow_ref"     = "assertion.job_workflow_ref"
+    },
+    var.github_environment == "" ? {} : { "attribute.environment" = "assertion.environment" },
+  )
 
   # Every check is ANDed. Google rejects a token that fails any of them
   # before it can be exchanged for credentials.
