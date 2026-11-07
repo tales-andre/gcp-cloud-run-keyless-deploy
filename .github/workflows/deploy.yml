@@ -8,7 +8,11 @@ name: deploy
 # This workflow has never run. It needs the repository variables printed by
 # `terraform output github_variables` for each environment, and GitHub
 # environments named staging and production (production with a required
-# reviewer). Without the variables every job after the first is skipped.
+# reviewer; the first job stops if that rule is missing). Without the
+# variables every job after the first is skipped.
+#
+# The image is the chatbot's default offline build (WITH_LLM=0): it has no AI
+# provider packages, so keep llm_provider = "none" in Terraform with it.
 #
 # Terraform is not run here: you apply infra/ yourself after reading the plan.
 
@@ -38,6 +42,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      actions: read # read the production environment's protection rules
     outputs:
       ready: ${{ steps.check.outputs.ready }}
       app_context: ${{ steps.app.outputs.context }}
@@ -68,6 +73,28 @@ jobs:
           fi
           echo "ready=$ready" >>"$GITHUB_OUTPUT"
 
+      # GitHub creates a missing environment on first use, with no protection,
+      # and the Google login condition only checks the environment's name. So
+      # check the reviewer rule here, before anything is built or deployed.
+      - name: production must have a required reviewer
+        if: steps.check.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if ! answer="$(gh api "repos/$REPOSITORY/environments/production" 2>&1)"; then
+            echo "::error::Could not read the production environment ($answer). Create it in Settings > Environments with a required reviewer (README, step 6)."
+            exit 1
+          fi
+          rules="$(jq -r '[.protection_rules[]?.type] | join(",")' <<<"$answer")"
+          case ",$rules," in
+            *,required_reviewers,*) echo "production has a required reviewer." ;;
+            *)
+              echo "::error::The production environment has no required reviewer. Add one in Settings > Environments > production (README, step 6)."
+              exit 1
+              ;;
+          esac
+
       - id: app
         name: the chatbot source pinned in app.env, as a Docker build context
         run: |
@@ -86,7 +113,7 @@ jobs:
     permissions:
       contents: read
       packages: write # push the scanned image to this repository's GHCR package
-    uses: tales-andre/github-actions-safe-deploys/.github/workflows/build.yml@6069b74c192e8f2236e9ecdc8c0cc15569f58c30 # main, 2026-11-07
+    uses: tales-andre/github-actions-safe-deploys/.github/workflows/build.yml@0d02eb78f3816a8d2ce043ea830edbd30da3dd52 # main as of 2026-11-07 01:31
     with:
       context: ${{ needs.configured.outputs.app_context }}
       dockerfile: Dockerfile
@@ -174,8 +201,9 @@ jobs:
     if: always() && needs.staging.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # The production environment requires a reviewer, and the Google Cloud
-    # login condition only accepts tokens from jobs in this environment.
+    # The production environment must have a required reviewer (checked in
+    # the first job), and the Google Cloud login condition only accepts
+    # tokens from jobs in this environment.
     environment: production
     permissions:
       contents: read

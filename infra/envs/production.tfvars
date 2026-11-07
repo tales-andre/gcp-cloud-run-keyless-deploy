@@ -14,8 +14,10 @@ min_instance_count = 0
 # invoker_members or Identity-Aware Proxy instead.
 public = true
 
-# Start offline. To switch on an AI provider: set llm_provider and llm_model,
-# apply, then add the key to the secret named in the llm_api_key_secret output.
+# Offline. An AI provider also needs an image built with WITH_LLM=1, which
+# deploy.yml does not build (README, Limits). With such an image deployed:
+# set llm_provider and llm_model, apply, then add the key to the secret named
+# in the llm_api_key_secret output.
 llm_provider = "none"
 llm_model    = ""
 

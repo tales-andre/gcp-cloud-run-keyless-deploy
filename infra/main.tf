@@ -56,6 +56,8 @@ module "registry" {
 # The AI provider key, when one is used. Terraform creates the empty secret;
 # you add the value yourself, so it never passes through Terraform state:
 #   printf '%s' "$KEY" | gcloud secrets versions add <secret_id> --data-file=-
+# A provider also needs an image built with WITH_LLM=1. The image deploy.yml
+# builds is offline only, and it stops at startup when LLM_PROVIDER is set.
 resource "google_secret_manager_secret" "llm_api_key" {
   count = local.llm_needs_key ? 1 : 0
 

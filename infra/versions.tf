@@ -1,5 +1,6 @@
 terraform {
-  # 1.9+ for cross-variable validation; 1.7+ for mock providers in `terraform test`.
+  # 1.9+ for cross-variable validation. The offline tests need 1.11+
+  # (override_during in tests/*.tftest.hcl); scripts/test-infra.sh checks it.
   required_version = ">= 1.9.0"
 
   required_providers {

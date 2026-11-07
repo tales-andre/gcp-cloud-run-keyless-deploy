@@ -19,6 +19,16 @@ export TF_INPUT=0
 
 step() { printf '\n==> %s\n' "$*"; }
 
+# The tests use override_during, which Terraform added in 1.11. Older versions
+# fail on every test file with an unexpected-argument error, so say why first.
+tf_version="$(terraform version | sed -n '1s/^Terraform v//p')"
+IFS=. read -r tf_major tf_minor _ <<<"$tf_version"
+if ! [[ "$tf_major" =~ ^[0-9]+$ && "$tf_minor" =~ ^[0-9]+$ ]] ||
+  [ "$tf_major" -lt 1 ] || { [ "$tf_major" -eq 1 ] && [ "$tf_minor" -lt 11 ]; }; then
+  echo "These tests need Terraform 1.11 or newer (found: ${tf_version:-unknown})." >&2
+  exit 1
+fi
+
 step "terraform fmt"
 terraform fmt -check -recursive -diff infra
 terraform fmt -check -recursive -diff import

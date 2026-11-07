@@ -1,4 +1,4 @@
-# PDF chatbot packaged for Google Cloud Run, deployed without keys
+# PDF chatbot packaged for Google Cloud Run, set up for keyless deploys
 
 [![ci](https://github.com/tales-andre/gcp-cloud-run-keyless-deploy/actions/workflows/ci.yml/badge.svg)](https://github.com/tales-andre/gcp-cloud-run-keyless-deploy/actions/workflows/ci.yml)
 
@@ -23,16 +23,22 @@ prove it offline. It was never applied to a live Google Cloud project: see
 - **One Cloud Run service per environment**, each in its own project, with a
   **cap on instances** (2 in staging, 5 in production) and scale to zero.
 - **A runtime service account per service** with no project-wide role: it can
-  read its own secret and nothing else.
+  read its own secret and nothing else, unless the optional database is on
+  (then two Cloud SQL roles, limited to that one instance).
 - **The AI provider key in Secret Manager**, passed to the container by
   reference. Terraform creates the empty secret and you add the value with
   `gcloud`, so the key never lands in Terraform state. The default offline
-  mode needs no key at all.
+  mode needs no key at all, and it is the only mode the image built here
+  runs (see [Limits](#limits)).
 - **Workload Identity Federation for GitHub Actions**: a token is accepted
   only from this repository, from `main`, and from a job in the matching
-  GitHub environment. Production jobs wait for a person to approve them.
+  GitHub environment. Production jobs wait for approval once the
+  `production` environment has a required reviewer (step 6 of
+  [Using it in your own Google Cloud project](#using-it-in-your-own-google-cloud-project)),
+  and `deploy.yml` stops before building anything if that rule is missing.
 - **A deployer service account with three narrow grants**: push to one image
-  repository, roll out one service, start it as the runtime account.
+  repository, roll out one service, start it as the runtime account. In
+  staging only, it may also call the service, for the post-deploy smoke test.
 - **Staging is never public.** A variable check stops it, a test proves the
   check works, and a policy check reads the environment files.
 - **An optional Cloud SQL module**: private IP only, client certificates
@@ -46,9 +52,9 @@ prove it offline. It was never applied to a live Google Cloud project: see
 
 ## Run it yourself
 
-Nothing here asks for a cloud account. You need Terraform 1.9 or newer (CI
-uses 1.11.3), Docker, git, curl and jq, and a bash shell (Git Bash works on
-Windows).
+Nothing here asks for a cloud account. You need Terraform 1.11 or newer to
+run the tests (they use `override_during`, added in 1.11; CI uses 1.11.3),
+Docker, git, curl and jq, and a bash shell (Git Bash works on Windows).
 
 ```bash
 scripts/fetch-app.sh     # the chatbot at the commit pinned in app.env, into app-src/
@@ -78,9 +84,9 @@ before it starts, and every test file replaces the Google provider with
 
 ## What CI checks
 
-[`ci.yml`](.github/workflows/ci.yml) runs on every push and pull request,
-on GitHub's runners, with no cloud credentials. Each job calls the same
-script you run locally.
+[`ci.yml`](.github/workflows/ci.yml) runs on every push to `main` and every
+pull request, on GitHub's runners, with no cloud credentials. Each job calls
+the same script you run locally.
 
 | Job | What it checks | It fails when |
 |---|---|---|
@@ -109,8 +115,9 @@ condition built from module inputs (the exact condition is asserted by
 `tests/github_wif.tftest.hcl` instead).
 
 [`deploy.yml`](.github/workflows/deploy.yml) is the deploy pipeline. It is
-started by hand from `main`. It builds the image once with the shared build
-workflow from
+started by hand from `main`, and it first checks that the `production`
+environment has a required reviewer. It builds the image once with the shared
+build workflow from
 [github-actions-safe-deploys](https://github.com/tales-andre/github-actions-safe-deploys)
 (pinned to a commit), which stops the image if Trivy finds a fixable critical
 or high vulnerability. Then it copies that digest into the staging registry,
@@ -137,13 +144,31 @@ GitHub workflow never runs Terraform; it only ships new images.
 
 4. Copy `terraform output github_variables` into the repository variables
    (Settings > Secrets and variables > Actions > Variables). None of them is
-   a secret. Repeat for production.
-5. Create the GitHub environments `staging` and `production`, and add a
-   required reviewer to `production`.
-6. Optional: set `github_repository_id` in the tfvars once the repository
+   a secret.
+5. Repeat steps 3 and 4 for production. The `infra/` folder is still set up
+   for the staging state, so switch it with `-reconfigure` (it does not move
+   or delete the staging state):
+
+   ```bash
+   terraform init -reconfigure -backend-config=envs/production.gcs.tfbackend
+   terraform plan -var-file=envs/production.tfvars -out=production.plan
+   terraform apply production.plan
+   ```
+
+   Use `-reconfigure` with the staging file the same way to go back.
+6. Create the GitHub environments `staging` and `production` before the first
+   deploy, and add a required reviewer to `production`. GitHub would
+   otherwise create them on first use with no protection; `deploy.yml`
+   refuses to run while `production` has no required reviewer.
+7. Optional: set `github_repository_id` in the tfvars once the repository
    exists, so a repository re-created under the same name cannot log in.
-7. Optional: to use an AI provider, set `llm_provider` and `llm_model`,
-   apply, then add the key yourself:
+8. Optional, and not covered by `deploy.yml`: an AI provider. The chatbot's
+   Dockerfile installs the provider packages only when it is built with
+   `--build-arg WITH_LLM=1`, and `deploy.yml` builds the default offline
+   image (the shared build workflow takes no build arguments). The offline
+   image stops at startup if `llm_provider` is set, so first deploy an image
+   you built with `WITH_LLM=1`. Then set `llm_provider` and `llm_model`,
+   apply, and add the key yourself:
    `printf '%s' "$KEY" | gcloud secrets versions add <secret from the output> --data-file=-`
 
 ## Bringing console-made resources under Terraform
@@ -181,7 +206,7 @@ import/                 separate root module for console-made resources (validat
 policy/                 conftest rules, their unit tests, and unsafe examples that must fail
 docs/                   COST.md, CUTOVER.md, architecture.svg
 scripts/                the checks, used the same way locally and in CI
-.github/workflows/      ci.yml (every push), deploy.yml (manual, never run)
+.github/workflows/      ci.yml (push to main, every PR), deploy.yml (manual, never run)
 app.env                 the chatbot repository and the commit it is built from
 ```
 
@@ -196,6 +221,22 @@ app.env                 the chatbot repository and the commit it is built from
   documentation, but a first real deploy may still turn up a missing one.
   Its build step calls the shared workflow in `github-actions-safe-deploys`
   at a fixed commit, so that repository has to be public at that commit.
+- **The image `deploy.yml` builds is offline only.** It is the chatbot's
+  Dockerfile with its defaults (`WITH_LLM=0`), so it has no AI provider
+  packages, and with `llm_provider` set it stops at startup. Building an
+  image with `WITH_LLM=1` is not part of this repository. The Terraform side
+  of a provider (the empty secret, the reference, who can read it) is tested
+  offline only.
+- **Approval is a GitHub setting, not code.** The production job waits for a
+  person only if the `production` environment has a required reviewer.
+  GitHub creates an environment named in a workflow on first use, with no
+  protection, and the Google login condition can check the environment's
+  name but not its rules. `deploy.yml` reads the rules through GitHub's API
+  and stops if the reviewer rule is missing; that check has never run either.
+- **Who can call each service.** Staging: the tester group, plus the deployer
+  so the post-deploy smoke test can reach the private service. Production is
+  public (`public = true` in `envs/production.tfvars`), because the sample
+  documents are public help pages; set it to `false` for internal documents.
 - **The import was never executed.** `import/` has only been through
   `terraform init -backend=false` and `terraform validate`.
 - **The login condition assumes GitHub's default `sub` claim**

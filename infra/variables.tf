@@ -92,7 +92,7 @@ variable "invoker_members" {
 }
 
 variable "llm_provider" {
-  description = "none runs the chatbot offline with no AI key. openai, anthropic or gemini reads the key from Secret Manager."
+  description = "none runs the chatbot offline with no AI key. openai, anthropic or gemini reads the key from Secret Manager, and needs an image built with WITH_LLM=1 (the image deploy.yml builds is offline only and stops at startup otherwise)."
   type        = string
   default     = "none"
 

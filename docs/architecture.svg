@@ -14,7 +14,7 @@
   <text x="40" y="50" font-size="18" font-weight="700" fill="#0f172a">GitHub</text>
 
   <rect x="40" y="70" width="250" height="110" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
-  <text x="55" y="95" font-size="14" font-weight="700" fill="#0f172a">ci.yml, every push and PR</text>
+  <text x="55" y="95" font-size="14" font-weight="700" fill="#0f172a">ci.yml: push to main, every PR</text>
   <text x="55" y="117" font-size="12.5" fill="#334155">terraform fmt, validate, test</text>
   <text x="55" y="135" font-size="12.5" fill="#334155">(mock Google provider)</text>
   <text x="55" y="153" font-size="12.5" fill="#334155">tflint, Checkov, conftest</text>
