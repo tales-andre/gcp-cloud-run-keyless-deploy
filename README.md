@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/tales-andre/gcp-cloud-run-keyless-deploy/actions/workflows/ci.yml/badge.svg)](https://github.com/tales-andre/gcp-cloud-run-keyless-deploy/actions/workflows/ci.yml)
 
-**A common request on freelance job boards:** a small company has a document
+**The problem:** a small company has a document
 chatbot that works on someone's laptop and wants it running in its own Google
 Cloud account: a staging copy for testers, a production copy for customers,
 deploys from GitHub, and no service account key sitting in GitHub secrets.
